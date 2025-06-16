@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -11,9 +11,26 @@ import {
   Zap,
   Bot,
   Filter,
+  Settings,
+  X,
+  RotateCcw,
+  Check,
+  Move,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Node {
   id: string;
@@ -22,6 +39,9 @@ interface Node {
   data: any;
   inputs: string[];
   outputs: string[];
+  config?: {
+    [key: string]: any;
+  };
 }
 
 interface Connection {
@@ -31,6 +51,13 @@ interface Connection {
   target: string;
   targetHandle: string;
   animated?: boolean;
+}
+
+interface SettingsPanel {
+  nodeId: string;
+  position: { x: number; y: number };
+  isMinimized: boolean;
+  isDragging: boolean;
 }
 
 interface WorkflowCanvasProps {
@@ -65,7 +92,13 @@ const WorkflowCanvas = ({
     sourceHandle: string;
     position: { x: number; y: number };
   } | null>(null);
+  const [settingsPanel, setSettingsPanel] = useState<SettingsPanel | null>(
+    null,
+  );
+  const [tempConfig, setTempConfig] = useState<{ [key: string]: any }>({});
+  const [isDraggingNode, setIsDraggingNode] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
 
   // Handle node selection
   const handleNodeSelect = (nodeId: string) => {
@@ -108,15 +141,25 @@ const WorkflowCanvas = ({
     event.preventDefault();
   };
 
-  // Handle node movement
-  const handleNodeDrag = (
-    nodeId: string,
-    position: { x: number; y: number },
-  ) => {
-    setNodes(
-      nodes.map((node) => (node.id === nodeId ? { ...node, position } : node)),
-    );
-  };
+  // Handle node movement with improved drag system
+  const handleNodeDrag = useCallback(
+    (nodeId: string, position: { x: number; y: number }) => {
+      setNodes((prevNodes) =>
+        prevNodes.map((node) =>
+          node.id === nodeId ? { ...node, position: { ...position } } : node,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleNodeDragStart = useCallback((nodeId: string) => {
+    setIsDraggingNode(nodeId);
+  }, []);
+
+  const handleNodeDragEnd = useCallback(() => {
+    setIsDraggingNode(null);
+  }, []);
 
   // Handle zoom in/out
   const handleZoom = (direction: "in" | "out") => {
@@ -126,69 +169,157 @@ const WorkflowCanvas = ({
     });
   };
 
-  // Start creating a connection
-  const startConnection = (
-    nodeId: string,
-    handleId: string,
-    event: React.MouseEvent,
-  ) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+  // Start creating a connection with improved handling
+  const startConnection = useCallback(
+    (nodeId: string, handleId: string, event: React.MouseEvent) => {
+      event.stopPropagation();
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
 
-    const position = {
-      x: (event.clientX - rect.left) / zoom - pan.x,
-      y: (event.clientY - rect.top) / zoom - pan.y,
-    };
+      const position = {
+        x: (event.clientX - rect.left) / zoom - pan.x,
+        y: (event.clientY - rect.top) / zoom - pan.y,
+      };
 
-    setDraggingConnection({
-      source: nodeId,
-      sourceHandle: handleId,
-      position,
-    });
-  };
+      setDraggingConnection({
+        source: nodeId,
+        sourceHandle: handleId,
+        position,
+      });
+    },
+    [zoom, pan],
+  );
 
-  // Update dragging connection position
-  const updateConnectionPosition = (event: React.MouseEvent) => {
-    if (!draggingConnection || !canvasRef.current) return;
+  // Update dragging connection position with improved performance
+  const updateConnectionPosition = useCallback(
+    (event: MouseEvent) => {
+      if (!draggingConnection || !canvasRef.current) return;
 
-    const rect = canvasRef.current.getBoundingClientRect();
-    const position = {
-      x: (event.clientX - rect.left) / zoom - pan.x,
-      y: (event.clientY - rect.top) / zoom - pan.y,
-    };
+      const rect = canvasRef.current.getBoundingClientRect();
+      const position = {
+        x: (event.clientX - rect.left) / zoom - pan.x,
+        y: (event.clientY - rect.top) / zoom - pan.y,
+      };
 
-    setDraggingConnection({
-      ...draggingConnection,
-      position,
-    });
-  };
+      setDraggingConnection((prev) => {
+        if (!prev) return null;
+        return { ...prev, position: { ...position } };
+      });
+    },
+    [draggingConnection, zoom, pan],
+  );
 
-  // Complete connection creation
-  const completeConnection = (targetNodeId: string, targetHandleId: string) => {
-    if (!draggingConnection) return;
+  // Complete connection creation with validation
+  const completeConnection = useCallback(
+    (targetNodeId: string, targetHandleId: string) => {
+      if (!draggingConnection || draggingConnection.source === targetNodeId) {
+        setDraggingConnection(null);
+        return;
+      }
 
-    const newConnection: Connection = {
-      id: `${draggingConnection.source}-${draggingConnection.sourceHandle}-${targetNodeId}-${targetHandleId}`,
-      source: draggingConnection.source,
-      sourceHandle: draggingConnection.sourceHandle,
-      target: targetNodeId,
-      targetHandle: targetHandleId,
-    };
+      // Check if connection already exists
+      const connectionExists = connections.some(
+        (conn) =>
+          conn.source === draggingConnection.source &&
+          conn.target === targetNodeId &&
+          conn.sourceHandle === draggingConnection.sourceHandle &&
+          conn.targetHandle === targetHandleId,
+      );
 
-    setConnections([...connections, newConnection]);
-    setDraggingConnection(null);
-  };
+      if (!connectionExists) {
+        const newConnection: Connection = {
+          id: `${draggingConnection.source}-${draggingConnection.sourceHandle}-${targetNodeId}-${targetHandleId}`,
+          source: draggingConnection.source,
+          sourceHandle: draggingConnection.sourceHandle,
+          target: targetNodeId,
+          targetHandle: targetHandleId,
+        };
+
+        setConnections((prev) => [...prev, newConnection]);
+      }
+
+      setDraggingConnection(null);
+    },
+    [draggingConnection, connections],
+  );
 
   // Cancel connection creation
-  const cancelConnection = () => {
+  const cancelConnection = useCallback(() => {
     setDraggingConnection(null);
-  };
+  }, []);
 
-  // Handle canvas mouse events
+  // Settings panel functions
+  const openSettingsPanel = useCallback(
+    (nodeId: string, event: React.MouseEvent) => {
+      event.stopPropagation();
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      setSettingsPanel({
+        nodeId,
+        position: {
+          x: node.position.x + 200,
+          y: node.position.y,
+        },
+        isMinimized: false,
+        isDragging: false,
+      });
+
+      setTempConfig(node.config || {});
+    },
+    [nodes],
+  );
+
+  const closeSettingsPanel = useCallback(() => {
+    setSettingsPanel(null);
+    setTempConfig({});
+  }, []);
+
+  const minimizeSettingsPanel = useCallback(() => {
+    setSettingsPanel((prev) =>
+      prev ? { ...prev, isMinimized: !prev.isMinimized } : null,
+    );
+  }, []);
+
+  const saveNodeConfig = useCallback(() => {
+    if (!settingsPanel) return;
+
+    setNodes((prevNodes) =>
+      prevNodes.map((node) =>
+        node.id === settingsPanel.nodeId
+          ? { ...node, config: { ...tempConfig } }
+          : node,
+      ),
+    );
+
+    closeSettingsPanel();
+  }, [settingsPanel, tempConfig, closeSettingsPanel]);
+
+  const resetNodeConfig = useCallback(() => {
+    if (!settingsPanel) return;
+
+    const node = nodes.find((n) => n.id === settingsPanel.nodeId);
+    setTempConfig(node?.config || {});
+  }, [settingsPanel, nodes]);
+
+  const handleSettingsPanelDrag = useCallback(
+    (position: { x: number; y: number }) => {
+      setSettingsPanel((prev) => {
+        if (!prev) return null;
+        return { ...prev, position: { ...position } };
+      });
+    },
+    [],
+  );
+
+  // Handle canvas mouse events with improved performance
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (draggingConnection) {
-        updateConnectionPosition(e as unknown as React.MouseEvent);
+        updateConnectionPosition(e);
       }
     };
 
@@ -198,14 +329,23 @@ const WorkflowCanvas = ({
       }
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    if (draggingConnection) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    }
 
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [draggingConnection]);
+  }, [draggingConnection, updateConnectionPosition, cancelConnection]);
+
+  // Sync with external selected node
+  useEffect(() => {
+    if (externalSelectedNode !== selectedNode) {
+      setSelectedNode(externalSelectedNode);
+    }
+  }, [externalSelectedNode]);
 
   // Handle workflow execution
   const executeWorkflow = () => {
@@ -302,34 +442,45 @@ const WorkflowCanvas = ({
     return descriptions[nodeType] || "Processing node";
   };
 
-  // Calculate connection path
-  const getConnectionPath = (
-    source: { x: number; y: number },
-    target: { x: number; y: number },
-  ) => {
-    const dx = target.x - source.x;
-    const dy = target.y - source.y;
-    const midX = source.x + dx / 2;
+  // Calculate connection path with smooth curves
+  const getConnectionPath = useCallback(
+    (source: { x: number; y: number }, target: { x: number; y: number }) => {
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const curvature = Math.min(distance * 0.3, 100);
 
-    return `M${source.x},${source.y} C${midX},${source.y} ${midX},${target.y} ${target.x},${target.y}`;
-  };
+      const controlPoint1 = {
+        x: source.x + curvature,
+        y: source.y,
+      };
+      const controlPoint2 = {
+        x: target.x - curvature,
+        y: target.y,
+      };
 
-  // Find node position by ID
-  const getNodePosition = (
-    nodeId: string,
-    handleId: string,
-    isOutput: boolean,
-  ) => {
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) return { x: 0, y: 0 };
+      return `M${source.x},${source.y} C${controlPoint1.x},${controlPoint1.y} ${controlPoint2.x},${controlPoint2.y} ${target.x},${target.y}`;
+    },
+    [],
+  );
 
-    // This is a simplified calculation - in a real app, you'd calculate exact handle positions
-    const handleOffset = isOutput ? 20 : 0;
-    return {
-      x: node.position.x + (isOutput ? 150 : 0),
-      y: node.position.y + 30 + handleOffset,
-    };
-  };
+  // Get node position by ID with improved calculations
+  const getNodePosition = useCallback(
+    (nodeId: string, handleId: string, isOutput: boolean) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return { x: 0, y: 0 };
+
+      const nodeWidth = 180;
+      const nodeHeight = 120;
+      const handleSize = 12;
+
+      return {
+        x: node.position.x + (isOutput ? nodeWidth : -handleSize / 2),
+        y: node.position.y + nodeHeight / 2,
+      };
+    },
+    [nodes],
+  );
 
   // Render connection lines
   const renderConnections = () => {
@@ -405,16 +556,26 @@ const WorkflowCanvas = ({
         }}
         drag
         dragMomentum={false}
-        onDragEnd={(_, info) => {
-          handleNodeDrag(node.id, {
-            x: node.position.x + info.offset.x,
-            y: node.position.y + info.offset.y,
-          });
+        dragElastic={0}
+        dragConstraints={false}
+        onDragStart={() => handleNodeDragStart(node.id)}
+        onDragEnd={(e, info) => {
+          e.stopPropagation();
+          handleNodeDragEnd();
+          const newPosition = {
+            x: node.position.x + info.offset.x / zoom,
+            y: node.position.y + info.offset.y / zoom,
+          };
+          handleNodeDrag(node.id, newPosition);
         }}
         onClick={(e) => {
           e.stopPropagation();
-          handleNodeSelect(node.id);
+          if (!isDraggingNode) {
+            handleNodeSelect(node.id);
+          }
         }}
+        whileDrag={{ scale: 1.05, zIndex: 1000 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
       >
         <Card
           className={`w-[180px] p-3 bg-background shadow-md ${getNodeColor(node.type)}`}
@@ -429,30 +590,65 @@ const WorkflowCanvas = ({
             {getNodeDescription(node.type)}
           </div>
 
+          {/* Settings button */}
+          <div className="flex justify-between items-center mb-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => openSettingsPanel(node.id, e)}
+              className="h-6 w-6 p-0"
+            >
+              <Settings className="h-3 w-3" />
+            </Button>
+          </div>
+
           {/* Input handles */}
           <div className="mb-2">
-            {node.inputs.map((input) => (
+            {node.inputs.map((input, index) => (
               <div
                 key={input}
-                className="flex items-center mb-1"
-                onMouseUp={() =>
-                  draggingConnection && completeConnection(node.id, input)
-                }
+                className="flex items-center mb-1 relative"
+                onMouseUp={(e) => {
+                  e.stopPropagation();
+                  if (draggingConnection) {
+                    completeConnection(node.id, input);
+                  }
+                }}
               >
-                <div className="w-3 h-3 rounded-full bg-blue-500 mr-2 cursor-pointer" />
-                <span className="text-xs">{input}</span>
+                <div
+                  className="w-3 h-3 rounded-full bg-blue-500 mr-2 cursor-pointer hover:bg-blue-600 transition-colors border-2 border-white shadow-sm"
+                  style={{
+                    position: "absolute",
+                    left: "-6px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                  }}
+                />
+                <span className="text-xs ml-2">{input}</span>
               </div>
             ))}
           </div>
 
           {/* Output handles */}
           <div>
-            {node.outputs.map((output) => (
-              <div key={output} className="flex items-center justify-end mb-1">
-                <span className="text-xs">{output}</span>
+            {node.outputs.map((output, index) => (
+              <div
+                key={output}
+                className="flex items-center justify-end mb-1 relative"
+              >
+                <span className="text-xs mr-2">{output}</span>
                 <div
-                  className="w-3 h-3 rounded-full bg-green-500 ml-2 cursor-pointer"
-                  onMouseDown={(e) => startConnection(node.id, output, e)}
+                  className="w-3 h-3 rounded-full bg-green-500 ml-2 cursor-pointer hover:bg-green-600 transition-colors border-2 border-white shadow-sm"
+                  style={{
+                    position: "absolute",
+                    right: "-6px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    startConnection(node.id, output, e);
+                  }}
                 />
               </div>
             ))}
@@ -513,6 +709,222 @@ const WorkflowCanvas = ({
           {renderNodes()}
         </div>
       </div>
+
+      {/* Settings Panel */}
+      {settingsPanel && (
+        <motion.div
+          ref={settingsPanelRef}
+          className={`fixed z-50 bg-background border rounded-lg shadow-lg ${
+            settingsPanel.isMinimized ? "w-12 h-12" : "w-80 h-96"
+          }`}
+          style={{
+            left: settingsPanel.position.x,
+            top: settingsPanel.position.y,
+          }}
+          drag
+          dragMomentum={false}
+          onDrag={(e, info) => {
+            e.stopPropagation();
+            const newPosition = {
+              x: settingsPanel.position.x + info.offset.x,
+              y: settingsPanel.position.y + info.offset.y,
+            };
+            handleSettingsPanelDrag(newPosition);
+          }}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+        >
+          {settingsPanel.isMinimized ? (
+            <div
+              className="w-full h-full flex items-center justify-center cursor-pointer"
+              onClick={minimizeSettingsPanel}
+            >
+              {getNodeIcon(
+                nodes.find((n) => n.id === settingsPanel.nodeId)?.type || "",
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col h-full">
+              {/* Header */}
+              <div className="flex items-center justify-between p-3 border-b bg-muted/50 rounded-t-lg cursor-move">
+                <div className="flex items-center gap-2">
+                  <Move className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">
+                    {nodes.find((n) => n.id === settingsPanel.nodeId)?.type ||
+                      "Node"}{" "}
+                    Settings
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={minimizeSettingsPanel}
+                    className="h-6 w-6 p-0"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={closeSettingsPanel}
+                    className="h-6 w-6 p-0"
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <ScrollArea className="flex-1 p-4">
+                <Tabs defaultValue="general" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="general">General</TabsTrigger>
+                    <TabsTrigger value="advanced">Advanced</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="general" className="space-y-4 mt-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Name</Label>
+                      <Input
+                        id="name"
+                        value={tempConfig.name || ""}
+                        onChange={(e) =>
+                          setTempConfig((prev) => ({
+                            ...prev,
+                            name: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter node name"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description</Label>
+                      <Textarea
+                        id="description"
+                        value={tempConfig.description || ""}
+                        onChange={(e) =>
+                          setTempConfig((prev) => ({
+                            ...prev,
+                            description: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter description"
+                        rows={3}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="timeout">Timeout (seconds)</Label>
+                      <Input
+                        id="timeout"
+                        type="number"
+                        value={tempConfig.timeout || ""}
+                        onChange={(e) =>
+                          setTempConfig((prev) => ({
+                            ...prev,
+                            timeout: parseInt(e.target.value) || 0,
+                          }))
+                        }
+                        placeholder="30"
+                      />
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="advanced" className="space-y-4 mt-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="retries">Retry Count</Label>
+                      <Input
+                        id="retries"
+                        type="number"
+                        value={tempConfig.retries || ""}
+                        onChange={(e) =>
+                          setTempConfig((prev) => ({
+                            ...prev,
+                            retries: parseInt(e.target.value) || 0,
+                          }))
+                        }
+                        placeholder="3"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="priority">Priority</Label>
+                      <Select
+                        value={tempConfig.priority || "normal"}
+                        onValueChange={(value) =>
+                          setTempConfig((prev) => ({
+                            ...prev,
+                            priority: value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="normal">Normal</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="critical">Critical</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="config">Custom Configuration</Label>
+                      <Textarea
+                        id="config"
+                        value={tempConfig.customConfig || ""}
+                        onChange={(e) =>
+                          setTempConfig((prev) => ({
+                            ...prev,
+                            customConfig: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter JSON configuration"
+                        rows={4}
+                      />
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </ScrollArea>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between p-3 border-t bg-muted/50 rounded-b-lg">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetNodeConfig}
+                  className="flex items-center gap-1"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Reset
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={closeSettingsPanel}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={saveNodeConfig}
+                    className="flex items-center gap-1"
+                  >
+                    <Check className="h-3 w-3" />
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      )}
     </div>
   );
 };
