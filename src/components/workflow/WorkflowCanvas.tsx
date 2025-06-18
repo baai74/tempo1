@@ -17,11 +17,6 @@ import {
   Check,
   Move,
   MessageCircle,
-  Send,
-  Sparkles,
-  ChevronUp,
-  ChevronDown,
-  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,8 +32,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { AIChat } from "./AIChat";
 
 interface Node {
   id: string;
@@ -66,24 +60,6 @@ interface SettingsPanel {
   position: { x: number; y: number };
   isMinimized: boolean;
   isDragging: boolean;
-}
-
-interface ChatMessage {
-  id: string;
-  type: "user" | "assistant" | "system";
-  content: string;
-  timestamp: Date;
-  workflow?: {
-    nodes: Node[];
-    connections: Connection[];
-  };
-}
-
-interface AIProvider {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
 }
 
 interface WorkflowCanvasProps {
@@ -124,39 +100,11 @@ const WorkflowCanvas = ({
   const [tempConfig, setTempConfig] = useState<{ [key: string]: any }>({});
   const [isDraggingNode, setIsDraggingNode] = useState<string | null>(null);
 
-  // AI Chat states
+  // AI Chat state
   const [showAIChat, setShowAIChat] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [currentMessage, setCurrentMessage] = useState("");
-  const [selectedProvider, setSelectedProvider] = useState("openrouter");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [chatExpanded, setChatExpanded] = useState(true);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const settingsPanelRef = useRef<HTMLDivElement>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-
-  // AI Providers configuration
-  const aiProviders: AIProvider[] = [
-    {
-      id: "openrouter",
-      name: "OpenRouter",
-      description: "Access to multiple AI models",
-      icon: <Zap className="w-4 h-4" />,
-    },
-    {
-      id: "chutes",
-      name: "Chutes.ai",
-      description: "Specialized workflow AI",
-      icon: <Bot className="w-4 h-4" />,
-    },
-    {
-      id: "openai",
-      name: "OpenAI",
-      description: "GPT models",
-      icon: <Sparkles className="w-4 h-4" />,
-    },
-  ];
 
   // Handle node selection
   const handleNodeSelect = (nodeId: string) => {
@@ -398,223 +346,14 @@ const WorkflowCanvas = ({
     };
   }, [draggingConnection, updateConnectionPosition, cancelConnection]);
 
-  // AI Chat functions
-  const generateWorkflowFromPrompt = async (prompt: string) => {
-    setIsGenerating(true);
-
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}-user`,
-      type: "user",
-      content: prompt,
-      timestamp: new Date(),
-    };
-    setChatMessages((prev) => [...prev, userMessage]);
-
-    try {
-      // Simulate AI response with workflow generation
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Generate sample workflow based on prompt
-      const generatedWorkflow = generateSampleWorkflow(prompt);
-
-      const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        type: "assistant",
-        content: `I've created a workflow based on your request: "${prompt}". The workflow includes ${generatedWorkflow.nodes.length} nodes with the following components: ${generatedWorkflow.nodes.map((n) => n.type).join(", ")}.`,
-        timestamp: new Date(),
-        workflow: generatedWorkflow,
-      };
-
-      setChatMessages((prev) => [...prev, assistantMessage]);
-
-      // Apply the generated workflow to canvas
-      setNodes(generatedWorkflow.nodes);
-      setConnections(generatedWorkflow.connections);
-    } catch (error) {
-      const errorMessage: ChatMessage = {
-        id: `msg-${Date.now()}-error`,
-        type: "system",
-        content:
-          "Sorry, I encountered an error while generating the workflow. Please try again.",
-        timestamp: new Date(),
-      };
-      setChatMessages((prev) => [...prev, errorMessage]);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const generateSampleWorkflow = (
-    prompt: string,
-  ): { nodes: Node[]; connections: Connection[] } => {
-    const lowerPrompt = prompt.toLowerCase();
-    const baseNodes: Node[] = [];
-    const baseConnections: Connection[] = [];
-
-    let yOffset = 100;
-    const xSpacing = 250;
-
-    // Determine workflow type based on prompt
-    if (
-      lowerPrompt.includes("scrape") ||
-      lowerPrompt.includes("data") ||
-      lowerPrompt.includes("extract")
-    ) {
-      // Data scraping workflow
-      const scraperNode: Node = {
-        id: "scraper-1",
-        type: "RapidAPI Scraper",
-        position: { x: 100, y: yOffset },
-        data: {
-          name: "RapidAPI Scraper",
-          description: "Scrape data via RapidAPI",
-        },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      const parserNode: Node = {
-        id: "parser-1",
-        type: "JSON Parser",
-        position: { x: 100 + xSpacing, y: yOffset },
-        data: { name: "JSON Parser", description: "Parse JSON data" },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      const dbNode: Node = {
-        id: "db-1",
-        type: "Supabase Database",
-        position: { x: 100 + xSpacing * 2, y: yOffset },
-        data: {
-          name: "Supabase Database",
-          description: "Store data in Supabase",
-        },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      baseNodes.push(scraperNode, parserNode, dbNode);
-      baseConnections.push(
-        {
-          id: "conn-1",
-          source: "scraper-1",
-          sourceHandle: "output",
-          target: "parser-1",
-          targetHandle: "input",
-        },
-        {
-          id: "conn-2",
-          source: "parser-1",
-          sourceHandle: "output",
-          target: "db-1",
-          targetHandle: "input",
-        },
-      );
-    } else if (
-      lowerPrompt.includes("ai") ||
-      lowerPrompt.includes("gpt") ||
-      lowerPrompt.includes("analyze")
-    ) {
-      // AI processing workflow
-      const inputNode: Node = {
-        id: "input-1",
-        type: "HTTP Request",
-        position: { x: 100, y: yOffset },
-        data: { name: "HTTP Request", description: "Receive input data" },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      const aiNode: Node = {
-        id: "ai-1",
-        type: "GPT-4",
-        position: { x: 100 + xSpacing, y: yOffset },
-        data: { name: "GPT-4", description: "Process with AI" },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      const outputNode: Node = {
-        id: "output-1",
-        type: "Webhook",
-        position: { x: 100 + xSpacing * 2, y: yOffset },
-        data: { name: "Webhook", description: "Send results" },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      baseNodes.push(inputNode, aiNode, outputNode);
-      baseConnections.push(
-        {
-          id: "conn-1",
-          source: "input-1",
-          sourceHandle: "output",
-          target: "ai-1",
-          targetHandle: "input",
-        },
-        {
-          id: "conn-2",
-          source: "ai-1",
-          sourceHandle: "output",
-          target: "output-1",
-          targetHandle: "input",
-        },
-      );
-    } else {
-      // Generic workflow
-      const startNode: Node = {
-        id: "start-1",
-        type: "HTTP Request",
-        position: { x: 100, y: yOffset },
-        data: { name: "HTTP Request", description: "Start workflow" },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      const processNode: Node = {
-        id: "process-1",
-        type: "JavaScript Function",
-        position: { x: 100 + xSpacing, y: yOffset },
-        data: { name: "JavaScript Function", description: "Process data" },
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      baseNodes.push(startNode, processNode);
-      baseConnections.push({
-        id: "conn-1",
-        source: "start-1",
-        sourceHandle: "output",
-        target: "process-1",
-        targetHandle: "input",
-      });
-    }
-
-    return { nodes: baseNodes, connections: baseConnections };
-  };
-
-  const handleSendMessage = () => {
-    if (!currentMessage.trim() || isGenerating) return;
-
-    generateWorkflowFromPrompt(currentMessage);
-    setCurrentMessage("");
-  };
-
-  const applyWorkflowFromMessage = (message: ChatMessage) => {
-    if (message.workflow) {
-      setNodes(message.workflow.nodes);
-      setConnections(message.workflow.connections);
-    }
-  };
-
-  // Auto-scroll chat to bottom
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
-  }, [chatMessages]);
+  // Handle AI-generated workflows
+  const handleWorkflowGenerated = useCallback(
+    (workflow: { nodes: Node[]; connections: Connection[] }) => {
+      setNodes(workflow.nodes);
+      setConnections(workflow.connections);
+    },
+    [],
+  );
 
   // Sync with external selected node
   useEffect(() => {
@@ -1211,225 +950,11 @@ const WorkflowCanvas = ({
       )}
 
       {/* AI Chat Panel */}
-      <AnimatePresence>
-        {showAIChat && (
-          <motion.div
-            className="fixed right-4 top-20 bottom-4 w-96 z-50"
-            initial={{ opacity: 0, x: 400 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 400 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          >
-            <Card className="h-full flex flex-col bg-background shadow-xl border">
-              {/* Chat Header */}
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">
-                      AI Workflow Builder
-                    </CardTitle>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setChatExpanded(!chatExpanded)}
-                      className="h-8 w-8 p-0"
-                    >
-                      {chatExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronUp className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowAIChat(false)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {chatExpanded && (
-                  <>
-                    <Separator className="my-2" />
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">AI Provider</Label>
-                      <Select
-                        value={selectedProvider}
-                        onValueChange={setSelectedProvider}
-                      >
-                        <SelectTrigger className="h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {aiProviders.map((provider) => (
-                            <SelectItem key={provider.id} value={provider.id}>
-                              <div className="flex items-center gap-2">
-                                {provider.icon}
-                                <div>
-                                  <div className="font-medium">
-                                    {provider.name}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {provider.description}
-                                  </div>
-                                </div>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-              </CardHeader>
-
-              {chatExpanded && (
-                <>
-                  {/* Chat Messages */}
-                  <CardContent className="flex-1 p-0">
-                    <ScrollArea className="h-full px-4" ref={chatScrollRef}>
-                      <div className="space-y-4 pb-4">
-                        {chatMessages.length === 0 && (
-                          <div className="text-center py-8">
-                            <Bot className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                            <p className="text-muted-foreground mb-2">
-                              Welcome to AI Workflow Builder!
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              Describe the workflow you want to create and I'll
-                              build it for you.
-                            </p>
-                            <div className="mt-4 space-y-2">
-                              <Badge variant="outline" className="text-xs">
-                                "Create a data scraping workflow"
-                              </Badge>
-                              <Badge variant="outline" className="text-xs">
-                                "Build an AI content analyzer"
-                              </Badge>
-                              <Badge variant="outline" className="text-xs">
-                                "Set up a webhook processor"
-                              </Badge>
-                            </div>
-                          </div>
-                        )}
-
-                        {chatMessages.map((message) => (
-                          <div
-                            key={message.id}
-                            className={`flex gap-3 ${
-                              message.type === "user"
-                                ? "justify-end"
-                                : "justify-start"
-                            }`}
-                          >
-                            {message.type !== "user" && (
-                              <div className="flex-shrink-0">
-                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                                  <Bot className="h-4 w-4 text-primary" />
-                                </div>
-                              </div>
-                            )}
-
-                            <div
-                              className={`max-w-[80%] rounded-lg px-3 py-2 ${
-                                message.type === "user"
-                                  ? "bg-primary text-primary-foreground"
-                                  : message.type === "system"
-                                    ? "bg-destructive/10 text-destructive border border-destructive/20"
-                                    : "bg-muted"
-                              }`}
-                            >
-                              <p className="text-sm">{message.content}</p>
-                              <p className="text-xs opacity-70 mt-1">
-                                {message.timestamp.toLocaleTimeString()}
-                              </p>
-
-                              {message.workflow && (
-                                <div className="mt-2 pt-2 border-t border-border/50">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      applyWorkflowFromMessage(message)
-                                    }
-                                    className="h-6 text-xs"
-                                  >
-                                    <Sparkles className="h-3 w-3 mr-1" />
-                                    Apply Workflow
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-
-                            {message.type === "user" && (
-                              <div className="flex-shrink-0">
-                                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                                  <span className="text-xs text-primary-foreground font-medium">
-                                    U
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-
-                        {isGenerating && (
-                          <div className="flex gap-3 justify-start">
-                            <div className="flex-shrink-0">
-                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                                <Loader2 className="h-4 w-4 text-primary animate-spin" />
-                              </div>
-                            </div>
-                            <div className="bg-muted rounded-lg px-3 py-2">
-                              <p className="text-sm">Generating workflow...</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-
-                  {/* Chat Input */}
-                  <div className="p-4 border-t">
-                    <div className="flex gap-2">
-                      <Input
-                        value={currentMessage}
-                        onChange={(e) => setCurrentMessage(e.target.value)}
-                        placeholder="Describe the workflow you want to create..."
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
-                        disabled={isGenerating}
-                        className="flex-1"
-                      />
-                      <Button
-                        onClick={handleSendMessage}
-                        disabled={!currentMessage.trim() || isGenerating}
-                        size="sm"
-                      >
-                        {isGenerating ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Send className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </Card>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AIChat
+        isOpen={showAIChat}
+        onClose={() => setShowAIChat(false)}
+        onWorkflowGenerated={handleWorkflowGenerated}
+      />
     </div>
   );
 };
