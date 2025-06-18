@@ -86,9 +86,9 @@ const WorkflowCanvas = ({
     useState<Connection[]>(initialConnections);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [selectedNode, setSelectedNode] = useState<string | null>(
-    externalSelectedNode,
-  );
+  const [internalSelectedNode, setInternalSelectedNode] = useState<
+    string | null
+  >(externalSelectedNode);
   const [draggingConnection, setDraggingConnection] = useState<{
     source: string;
     sourceHandle: string;
@@ -107,45 +107,51 @@ const WorkflowCanvas = ({
   const settingsPanelRef = useRef<HTMLDivElement>(null);
 
   // Handle node selection
-  const handleNodeSelect = (nodeId: string) => {
-    const newSelection = nodeId === selectedNode ? null : nodeId;
-    setSelectedNode(newSelection);
-    onNodeSelect(newSelection || "");
-  };
+  const handleNodeSelect = useCallback(
+    (nodeId: string) => {
+      const newSelection = nodeId === internalSelectedNode ? null : nodeId;
+      setInternalSelectedNode(newSelection);
+      onNodeSelect(newSelection || "");
+    },
+    [internalSelectedNode, onNodeSelect],
+  );
 
   // Handle drop from NodeLibrary
-  const handleDrop = (event: React.DragEvent) => {
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      try {
+        const nodeData = JSON.parse(
+          event.dataTransfer.getData("application/json"),
+        );
+        const position = {
+          x: (event.clientX - rect.left) / zoom - pan.x,
+          y: (event.clientY - rect.top) / zoom - pan.y,
+        };
+
+        const newNode: Node = {
+          id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type: nodeData.name,
+          position,
+          data: nodeData,
+          inputs: ["input"],
+          outputs: ["output"],
+        };
+
+        setNodes((prevNodes) => [...prevNodes, newNode]);
+      } catch (error) {
+        console.error("Failed to parse dropped node data:", error);
+      }
+    },
+    [zoom, pan.x, pan.y],
+  );
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    try {
-      const nodeData = JSON.parse(
-        event.dataTransfer.getData("application/json"),
-      );
-      const position = {
-        x: (event.clientX - rect.left) / zoom - pan.x,
-        y: (event.clientY - rect.top) / zoom - pan.y,
-      };
-
-      const newNode: Node = {
-        id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: nodeData.name,
-        position,
-        data: nodeData,
-        inputs: ["input"],
-        outputs: ["output"],
-      };
-
-      setNodes([...nodes, newNode]);
-    } catch (error) {
-      console.error("Failed to parse dropped node data:", error);
-    }
-  };
-
-  const handleDragOver = (event: React.DragEvent) => {
-    event.preventDefault();
-  };
+  }, []);
 
   // Handle node movement with improved drag system
   const handleNodeDrag = useCallback(
@@ -355,15 +361,8 @@ const WorkflowCanvas = ({
     [],
   );
 
-  // Sync with external selected node
-  useEffect(() => {
-    if (externalSelectedNode !== selectedNode) {
-      setSelectedNode(externalSelectedNode);
-    }
-  }, [externalSelectedNode]);
-
   // Handle workflow execution
-  const executeWorkflow = () => {
+  const executeWorkflow = useCallback(() => {
     // Animate connections during execution
     const animatedConnections = connections.map((conn) => ({
       ...conn,
@@ -378,12 +377,53 @@ const WorkflowCanvas = ({
     setTimeout(() => {
       setConnections(connections.map((conn) => ({ ...conn, animated: false })));
     }, 3000);
-  };
+  }, [nodes, connections, onExecute]);
 
   // Handle workflow save
-  const saveWorkflow = () => {
+  const saveWorkflow = useCallback(() => {
     onSave(nodes, connections);
-  };
+  }, [nodes, connections, onSave]);
+
+  // Handle AI workflow actions
+  const handleWorkflowAction = useCallback(
+    (action: { type: string; target?: string; parameters?: any }) => {
+      switch (action.type) {
+        case "build":
+          // AI is building the workflow - already handled by handleWorkflowGenerated
+          console.log("AI is building workflow...");
+          break;
+        case "edit":
+          // AI wants to edit a specific node or connection
+          if (action.target) {
+            setInternalSelectedNode(action.target);
+          }
+          break;
+        case "test":
+          // AI wants to test the workflow
+          console.log("AI is testing workflow...");
+          // Add test logic here
+          break;
+        case "run":
+          // AI wants to run the workflow
+          executeWorkflow();
+          break;
+        case "save":
+          // AI wants to save the workflow
+          saveWorkflow();
+          break;
+        default:
+          console.log("Unknown AI action:", action.type);
+      }
+    },
+    [executeWorkflow, saveWorkflow],
+  );
+
+  // Sync with external selected node
+  useEffect(() => {
+    if (externalSelectedNode !== internalSelectedNode) {
+      setInternalSelectedNode(externalSelectedNode);
+    }
+  }, [externalSelectedNode, internalSelectedNode]);
 
   // Get node color based on type
   const getNodeColor = (nodeType: string) => {
@@ -563,7 +603,7 @@ const WorkflowCanvas = ({
     return nodes.map((node) => (
       <motion.div
         key={node.id}
-        className={`absolute ${selectedNode === node.id ? "ring-2 ring-primary" : ""}`}
+        className={`absolute ${internalSelectedNode === node.id ? "ring-2 ring-primary" : ""}`}
         style={{
           left: node.position.x,
           top: node.position.y,
@@ -576,6 +616,7 @@ const WorkflowCanvas = ({
         onDragStart={() => handleNodeDragStart(node.id)}
         onDragEnd={(e, info) => {
           e.stopPropagation();
+          e.preventDefault();
           handleNodeDragEnd();
           const newPosition = {
             x: node.position.x + info.offset.x / zoom,
@@ -585,6 +626,7 @@ const WorkflowCanvas = ({
         }}
         onClick={(e) => {
           e.stopPropagation();
+          e.preventDefault();
           if (!isDraggingNode) {
             handleNodeSelect(node.id);
           }
@@ -610,7 +652,11 @@ const WorkflowCanvas = ({
             <Button
               variant="ghost"
               size="sm"
-              onClick={(e) => openSettingsPanel(node.id, e)}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                openSettingsPanel(node.id, e);
+              }}
               className="h-6 w-6 p-0"
             >
               <Settings className="h-3 w-3" />
@@ -625,6 +671,7 @@ const WorkflowCanvas = ({
                 className="flex items-center mb-1 relative"
                 onMouseUp={(e) => {
                   e.stopPropagation();
+                  e.preventDefault();
                   if (draggingConnection) {
                     completeConnection(node.id, input);
                   }
@@ -662,6 +709,7 @@ const WorkflowCanvas = ({
                   }}
                   onMouseDown={(e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     startConnection(node.id, output, e);
                   }}
                 />
@@ -710,7 +758,11 @@ const WorkflowCanvas = ({
       <div
         ref={canvasRef}
         className="flex-1 relative overflow-hidden"
-        onClick={() => setSelectedNode(null)}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setInternalSelectedNode(null);
+        }}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
@@ -954,6 +1006,7 @@ const WorkflowCanvas = ({
         isOpen={showAIChat}
         onClose={() => setShowAIChat(false)}
         onWorkflowGenerated={handleWorkflowGenerated}
+        onWorkflowAction={handleWorkflowAction}
       />
     </div>
   );

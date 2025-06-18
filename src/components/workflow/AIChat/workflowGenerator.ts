@@ -1,4 +1,8 @@
-import { WorkflowGenerationRequest, WorkflowGenerationResponse } from "./types";
+import {
+  WorkflowGenerationRequest,
+  WorkflowGenerationResponse,
+  AIConfiguration,
+} from "./types";
 
 // Node templates for different workflow types
 const NODE_TEMPLATES = {
@@ -204,28 +208,85 @@ function generateConnections(
   });
 }
 
+// Simulate AI API call based on provider
+async function callAIProvider(
+  prompt: string,
+  configuration: AIConfiguration,
+  signal?: AbortSignal,
+): Promise<{ response: string; actions?: any[] }> {
+  // Check if request was cancelled
+  if (signal?.aborted) {
+    throw new Error("Request cancelled");
+  }
+
+  // Simulate API delay based on provider
+  const delays = {
+    openai: 1000 + Math.random() * 500,
+    gemini: 800 + Math.random() * 400,
+    openrouter: 1200 + Math.random() * 600,
+    "chutes.ai": 900 + Math.random() * 300,
+  };
+
+  const delay = delays[configuration.provider as keyof typeof delays] || 1000;
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, delay);
+
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        reject(new Error("Request cancelled"));
+      });
+    }
+  });
+
+  // Enhanced prompt analysis with MCP server capabilities
+  const mcpCapabilities = configuration.mcpServers
+    .filter((server) => server.enabled)
+    .flatMap((server) => server.capabilities);
+
+  // Simulate intelligent response based on provider and MCP capabilities
+  const hasAdvancedCapabilities =
+    mcpCapabilities.includes("workflow_analysis") ||
+    mcpCapabilities.includes("code_generation");
+
+  const actions = [];
+
+  // Determine if the AI should take autonomous actions
+  if (
+    prompt.toLowerCase().includes("build") ||
+    prompt.toLowerCase().includes("create")
+  ) {
+    actions.push({ type: "build", parameters: { auto: true } });
+  }
+  if (prompt.toLowerCase().includes("test")) {
+    actions.push({ type: "test", parameters: { auto: true } });
+  }
+  if (
+    prompt.toLowerCase().includes("run") ||
+    prompt.toLowerCase().includes("execute")
+  ) {
+    actions.push({ type: "run", parameters: { auto: true } });
+  }
+
+  return {
+    response: `Processing with ${configuration.provider} (${configuration.model || "default model"})${hasAdvancedCapabilities ? " with enhanced MCP capabilities" : ""}`,
+    actions: actions.length > 0 ? actions : undefined,
+  };
+}
+
 // Main workflow generation function
 export async function generateWorkflowFromPrompt(
   request: WorkflowGenerationRequest,
   signal?: AbortSignal,
 ): Promise<WorkflowGenerationResponse> {
   try {
-    // Check if request was cancelled
-    if (signal?.aborted) {
-      throw new Error("Request cancelled");
-    }
-
-    // Simulate API delay (replace with real API call)
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(resolve, 1500 + Math.random() * 1000);
-
-      if (signal) {
-        signal.addEventListener("abort", () => {
-          clearTimeout(timeout);
-          reject(new Error("Request cancelled"));
-        });
-      }
-    });
+    // Call AI provider with configuration
+    const aiResponse = await callAIProvider(
+      request.prompt,
+      request.configuration,
+      signal,
+    );
 
     // Analyze prompt to determine workflow type
     const workflowType = analyzePrompt(request.prompt);
@@ -235,14 +296,20 @@ export async function generateWorkflowFromPrompt(
     const nodes = generateWorkflowNodes(template);
     const connections = generateConnections(nodes, template.connections);
 
-    // Create response message
+    // Create enhanced response message
     const nodeTypes = [...new Set(nodes.map((n) => n.type))];
-    const message = `I've created a ${workflowType.replace("_", " ")} workflow based on your request: "${request.prompt}". The workflow includes ${nodes.length} nodes with the following components: ${nodeTypes.join(", ")}. You can customize each node by clicking the settings icon.`;
+    const mcpInfo =
+      request.configuration.mcpServers.filter((s) => s.enabled).length > 0
+        ? ` Enhanced with ${request.configuration.mcpServers.filter((s) => s.enabled).length} MCP server(s).`
+        : "";
+
+    const message = `${aiResponse.response}\n\nI've created a ${workflowType.replace("_", " ")} workflow based on your request: "${request.prompt}". The workflow includes ${nodes.length} nodes with the following components: ${nodeTypes.join(", ")}.${mcpInfo} You can customize each node by clicking the settings icon.`;
 
     return {
       success: true,
       workflow: { nodes, connections },
       message,
+      actions: aiResponse.actions,
     };
   } catch (error) {
     if (error instanceof Error && error.message === "Request cancelled") {
